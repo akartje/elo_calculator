@@ -1,0 +1,115 @@
+
+"""
+creation date: July 17, 2022
+creator: akartje
+desc: This will be an ELO rating system: contestants start with 1500 ELO points, and gain/lose them as they win/lose matches against each other
+If higher rated player wins, less points exchanged than if lower player wins (upset!)
+
+My main source is this wikipedia article:
+https://en.wikipedia.org/wiki/Elo_rating_system#Mathematical_details
+
+for two contestants A and B, with ratings Ra and Rb:
+    Qa = 10 ** (Ra/400)
+    Qb = 10 ** (Rb/400)
+    expected scores for A and B:
+    Ea = Qa/(Qa + Qb)
+    Eb = Qb/(Qa + Qb)
+    Actual scores Aa and Ab: 1 for win, 0 for loss, 0.5 for tie
+    Ea + Eb = Aa + Ab = 1
+    Score updates:
+    Ra = Ra + K(Aa - Ea)
+    Rb = Rb + K(Ab - Eb)
+    where K is adjustment factor. K varies by experience level, as new entrants need to quickly settle around true value
+    K = 32 for new players, K = 16 for experienced
+    Can also think of this as such: Each player puts ante of Ex * K into a pot, winner takes whole pot or split pot evenly on tie
+
+example game: 1400 vs 1600, non-master players: K = 32
+    Qa = 10 ** (1400/400) = 3162.28
+    Qb = 10 ** (1600/400) = 10000.00
+    Ea = Qa/(Qa + Qb) = 0.2423
+    Eb = Qb/(Qa + Qb) = 0.7597
+    by design, a 200 point advantage means a roughly 75% win chance
+    game is an upset! Player A wins!
+    Aa = 1, Ab = 0
+    Ra = 1400 + 32 (1 - 0.2423) = 1424
+    Rb = 1600 + 32 (0 - 0.7597) = 1576
+    if game was not an upset, Player B won:
+    Aa = 0, Ab = 1
+    Ra = 1400 + 32 (0 - 0.2423) = 1392
+    Rb = 1600 + 32 (1 - 0.7597) = 1608
+    if game is a tie, still a bit of an upset:
+    Aa = Ab = 0.5
+    Ra = 1400 + 32 (0.5 - 0.2423) = 1408
+    Rb = 1600 + 32 (0.5 - 0.7597) = 1592
+"""
+import numpy as np
+import pandas as pd
+
+# first, keep team info in a csv
+# team id's (index), team names, ratings, rated games played (rgp), and max rating
+teamData = pd.read_csv("Files/Python/teamSheet.csv", header=0, index_col=0)
+
+teamdf = pd.DataFrame(teamData)
+
+"""
+print(teamdf)
+>>>          teamname rating rgp maxrating 
+>>> Stk      Strikers   1500   0      1500
+>>> Thb  Thunderbolts   1500   0      1500
+>>> Bbr     Bluebirds   1500   0      1500
+>>> Drg       Dragons   1500   0      1500
+
+"""
+
+
+# will read input from game data csv file
+# game date, home team id, home team score, away team id, away team score
+
+tournyData = pd.read_csv('Files/Python/tournamentSheet.csv', header=0, index_col=0, parse_dates=True)
+
+"""
+print(tournyData)
+>>>     Date    Home      HomeScore      Away      AwayScore 
+>>> 9/1/2022     Stk              3       Drg              5
+>>> 9/1/2022     Thb              6       Bbr              7
+.      .          .               .        .               .
+"""
+
+def rankUpdate(teams, gamedata):
+    #teams is a dataframe, gamedata is a dataseries from slicing row of tourneyData dataframe
+    hteam = gamedata[0]
+    hscore = gamedata[1]
+    ateam = gamedata[2]
+    ascore = gamedata[3]
+    hrating = teams.loc[hteam, "rating"]
+    arating = teams.loc[ateam, "rating"]
+
+    Qh = 10**(hrating/400)
+    Qa = 10**(arating/400)
+    Qt = Qh + Qa
+    Eh = Qh / Qt
+    Ea = Qa / Qt # note Eh + Ea = 1
+
+    At = hscore+ascore
+    Ah = hscore/At
+    Aa = ascore/At     # Instead of binary 1/0, scale score by how close/far the game was!
+
+    hdiff = round(32 * (Ah - Eh))
+    adiff = round(32 * (Aa - Ea))
+    teams.loc[hteam, "rating"] = hrating + hdiff
+    teams.loc[ateam, "rating"] = arating + adiff
+    for team in (hteam, ateam):
+        teams.loc[team, "rgp"] += 1
+        if teams.loc[team, "rating"] > teams.loc[team, "maxrating"]:
+            teams.loc[team, "maxrating"] = teams.loc[team, "rating"]
+
+
+def tournyResult(tmdf, trd):
+    for index, row in trd.iterrows():
+        rankUpdate(tmdf, row)
+    tmdf.to_csv('Files/Python/teamSheet.csv')
+    return tmdf
+
+
+if __name__ == '__main__':
+    tournyResult(teamdf, tournyData)
